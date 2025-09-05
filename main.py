@@ -3,13 +3,14 @@ from flask import Flask, request, jsonify
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime
+from firebase_admin import App
 
 # Initialize Flask app
 app = Flask(__name__)
 
 # Initialize Firebase Admin SDK in the global scope to be reused across requests.
 # This prevents timeouts by avoiding re-initialization on every incoming request.
-if not firebase_admin.apps:
+if not App.get_apps():
     try:
         # Use the GOOGLE_APPLICATION_CREDENTIALS environment variable for security
         firebase_admin.initialize_app()
