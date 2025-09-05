@@ -1,17 +1,14 @@
 import os
-import re
 from flask import Flask, request, jsonify
 import firebase_admin
 from firebase_admin import credentials, firestore
+from datetime import datetime
 
 # Initialize Flask app
 app = Flask(__name__)
 
 # Initialize Firebase Admin SDK
-# Use your service account credentials file
-# Recommended: set the GOOGLE_APPLICATION_CREDENTIALS environment variable
-# cred = credentials.Certificate("path/to/your/serviceAccountKey.json")
-# firebase_admin.initialize_app(cred)
+# Use the GOOGLE_APPLICATION_CREDENTIALS environment variable for security
 firebase_admin.initialize_app()
 db = firestore.client()
 
@@ -19,10 +16,10 @@ db = firestore.client()
 def webhook():
     """
     Dialogflow CX webhook for doctor availability.
+    It queries Firestore to find doctors based on specialty, date, and location.
     """
     request_data = request.get_json()
     
-    # Extract parameters from the Dialogflow request
     session_info = request_data.get('sessionInfo', {})
     parameters = session_info.get('parameters', {})
     tag = request_data.get('fulfillmentInfo', {}).get('tag')
@@ -30,48 +27,57 @@ def webhook():
     response_text = "I'm sorry, an error occurred. Please try again."
 
     if tag == 'search_doctors':
-        location = parameters.get('location')
         specialty = parameters.get('specialty')
+        location = parameters.get('location', {}).get('city')
         date_str = parameters.get('date')
 
-        if not location or not specialty or not date_str:
-            response_text = "I'm missing some information. Please provide your preferred location, specialty, and date."
+        if not specialty or not location or not date_str:
+            response_text = "I'm missing some information. Please provide your preferred specialty, location, and date."
         else:
             try:
-                # Convert the date string from Dialogflow (e.g., '2025-09-05T12:00:00Z')
-                # to a Firestore-compatible date format for filtering
-                # This example uses a simple date string comparison
-                date_iso = date_str.split('T')[0]
+                # Dialogflow sends date as ISO 8601 string (e.g., '2025-09-05T12:00:00Z')
+                # We need to extract the date part and check if it's in the future
+                requested_date = datetime.strptime(date_str.split('T')[0], '%Y-%m-%d').date()
+                today = datetime.now().date()
                 
-                # Assume specialty is an actual field in your document
-                # This needs to be configured in your Firestore collection schema
-                docs_ref = db.collection('PbiVgrmLxGhdcoynZKKFxrXlz373') \
-                             .where('specialty', '==', specialty) \
-                             .where('city', '==', location)
+                # We only show upcoming availability, so check if the date is in the past
+                if requested_date < today:
+                    response_text = "I can only check for future appointments. Please provide a date that isn't in the past."
+                    return jsonify({
+                        'fulfillmentResponse': {
+                            'messages': [{ 'text': { 'text': [response_text] } }]
+                        }
+                    })
+
+                # Reference the 'doctors' collection
+                docs_ref = db.collection('doctors')
                 
-                docs = docs_ref.get()
+                # Query Firestore for matching specialty and city
+                docs = docs_ref.where('specialty', '==', specialty).where('city', '==', location).stream()
                 
                 available_doctors = []
                 for doc in docs:
                     doctor_data = doc.to_dict()
-                    bookings = doctor_data.get('bookings', [])
                     
-                    # Check for availability on the specified date
-                    is_available_on_date = False
-                    for booking in bookings:
-                        # Assuming 'date' in booking is a string like '2025-09-05'
-                        if booking.get('date') == date_iso:
-                            is_available_on_date = True
-                            break
+                    # 'availability' is a map in Firestore, with dates as keys
+                    availability_map = doctor_data.get('availability', {})
                     
-                    if is_available_on_date:
-                        available_doctors.append(doctor_data)
+                    # Check if the requested date exists in the availability map
+                    # The date key should be in a format like '2025-09-05'
+                    if requested_date.isoformat() in availability_map:
+                        available_times = availability_map[requested_date.isoformat()]
+                        if available_times:
+                            available_doctors.append({
+                                'name': doctor_data.get('name'),
+                                'times': ", ".join(available_times)
+                            })
                 
                 if available_doctors:
-                    doctor_list_text = ", ".join([doc['name'] + ' ' + doc['surname'] for doc in available_doctors])
-                    response_text = f"I found the following {specialty} doctors available in {location} on {date_iso}: {doctor_list_text}. Which one would you like to book with?"
+                    doctor_list_text = " and ".join([f"{doc['name']} has availability at {doc['times']}" for doc in available_doctors])
+                    response_text = f"I found the following doctors: {doctor_list_text}. Please let me know which doctor and time you would like to book."
                 else:
-                    response_text = f"I could not find any {specialty} doctors in {location} available on {date_iso}. Would you like to check a different date or location?"
+                    response_text = f"I could not find any {specialty} doctors in {location} available on {requested_date.strftime('%B %d, %Y')}. Would you like to check a different date or location?"
+            
             except Exception as e:
                 app.logger.error(f"Firestore query error: {e}")
                 response_text = "I am having trouble looking for doctors right now. Please try again later."
@@ -90,7 +96,5 @@ def webhook():
     })
 
 if __name__ == '__main__':
-    # For local development, use a development server
-    # In production (e.g., Cloud Run), the port is set by the environment
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
