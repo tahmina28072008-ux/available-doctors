@@ -34,10 +34,24 @@ def webhook():
         # Safely extract the date string from the parameter
         if isinstance(date_param, str):
             date_str = date_param
-        elif isinstance(date_param, dict) and 'date_time' in date_param:
-            date_str = date_param['date_time']
+        elif isinstance(date_param, dict):
+            # The log shows the date parameter has keys 'year', 'month', and 'day'
+            try:
+                year = date_param.get('year')
+                month = date_param.get('month')
+                day = date_param.get('day')
+                # Construct an ISO 8601 formatted date string
+                date_str = datetime(year, month, day).isoformat()
+            except (KeyError, TypeError):
+                # Handle cases where the required keys are missing or invalid
+                response_text = "I couldn't understand the date provided. Please try again."
+                return jsonify({
+                    'fulfillmentResponse': {
+                        'messages': [{ 'text': { 'text': [response_text] } }]
+                    }
+                })
         else:
-            # Handle cases where the date parameter is missing or in an unexpected format
+            # Handle cases where the date parameter is in an unexpected format
             response_text = "I couldn't understand the date provided. Please try again."
             return jsonify({
                 'fulfillmentResponse': {
