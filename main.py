@@ -1,94 +1,96 @@
 import os
+import re
 from flask import Flask, request, jsonify
-from google.cloud import firestore
+import firebase_admin
+from firebase_admin import credentials, firestore
 
+# Initialize Flask app
 app = Flask(__name__)
 
-# Initialize the Firestore client. This assumes the Cloud Run environment
-# provides the necessary credentials automatically.
-db = firestore.Client()
-DOCTORS_COLLECTION = 'doctors'
+# Initialize Firebase Admin SDK
+# Use your service account credentials file
+# Recommended: set the GOOGLE_APPLICATION_CREDENTIALS environment variable
+# cred = credentials.Certificate("path/to/your/serviceAccountKey.json")
+# firebase_admin.initialize_app(cred)
+firebase_admin.initialize_app()
+db = firestore.client()
 
-@app.route('/webhook', methods=['POST'])
+@app.route('/', methods=['POST'])
 def webhook():
     """
-    Handles incoming webhook requests and queries Firestore for doctors.
-    
-    It extracts specialty and location from the agent's request and
-    returns a list of available doctors.
+    Dialogflow CX webhook for doctor availability.
     """
-    try:
-        req = request.get_json(silent=True)
-        print(f"Received webhook request: {req}")
+    request_data = request.get_json()
+    
+    # Extract parameters from the Dialogflow request
+    session_info = request_data.get('sessionInfo', {})
+    parameters = session_info.get('parameters', {})
+    tag = request_data.get('fulfillmentInfo', {}).get('tag')
+    
+    response_text = "I'm sorry, an error occurred. Please try again."
 
-        # Extract the parameters from the agent's request payload.
-        parameters = req.get('sessionInfo', {}).get('parameters', {})
+    if tag == 'search_doctors':
+        location = parameters.get('location')
         specialty = parameters.get('specialty')
-        city = parameters.get('location') # Assuming the parameter name is 'location'
+        date_str = parameters.get('date')
 
-        # Build the Firestore query.
-        doctors_ref = db.collection(DOCTORS_COLLECTION)
-        query = doctors_ref
-
-        # Add filters to the query based on the parameters.
-        if specialty:
-            # Query the 'specialty' field in the documents.
-            query = query.where('specialty', '==', specialty)
-        if city:
-            # Query the 'city' field in the documents.
-            query = query.where('city', '==', city)
-
-        # Execute the query and get the documents.
-        docs = query.stream()
-
-        found_doctors = []
-        for doc in docs:
-            doc_data = doc.to_dict()
-            name = doc_data.get('name')
-            # For simplicity, we'll just check if the availability map is not empty.
-            # A more robust solution would check specific time slots.
-            is_available = bool(doc_data.get('availability')) 
-            
-            if name and is_available:
-                found_doctors.append(name)
-        
-        # Prepare the response message based on the query results.
-        if found_doctors:
-            doctor_list = ", ".join(found_doctors)
-            message = f"Okay, we found some doctors for you. They are: {doctor_list}."
+        if not location or not specialty or not date_str:
+            response_text = "I'm missing some information. Please provide your preferred location, specialty, and date."
         else:
-            message = "I'm sorry, I couldn't find any available doctors with that criteria."
-
-        # Construct the final response payload for the agent.
-        response = {
-            "fulfillmentResponse": {
-                "messages": [
-                    {
-                        "text": {
-                            "text": [message]
-                        }
+            try:
+                # Convert the date string from Dialogflow (e.g., '2025-09-05T12:00:00Z')
+                # to a Firestore-compatible date format for filtering
+                # This example uses a simple date string comparison
+                date_iso = date_str.split('T')[0]
+                
+                # Assume specialty is an actual field in your document
+                # This needs to be configured in your Firestore collection schema
+                docs_ref = db.collection('PbiVgrmLxGhdcoynZKKFxrXlz373') \
+                             .where('specialty', '==', specialty) \
+                             .where('city', '==', location)
+                
+                docs = docs_ref.get()
+                
+                available_doctors = []
+                for doc in docs:
+                    doctor_data = doc.to_dict()
+                    bookings = doctor_data.get('bookings', [])
+                    
+                    # Check for availability on the specified date
+                    is_available_on_date = False
+                    for booking in bookings:
+                        # Assuming 'date' in booking is a string like '2025-09-05'
+                        if booking.get('date') == date_iso:
+                            is_available_on_date = True
+                            break
+                    
+                    if is_available_on_date:
+                        available_doctors.append(doctor_data)
+                
+                if available_doctors:
+                    doctor_list_text = ", ".join([doc['name'] + ' ' + doc['surname'] for doc in available_doctors])
+                    response_text = f"I found the following {specialty} doctors available in {location} on {date_iso}: {doctor_list_text}. Which one would you like to book with?"
+                else:
+                    response_text = f"I could not find any {specialty} doctors in {location} available on {date_iso}. Would you like to check a different date or location?"
+            except Exception as e:
+                app.logger.error(f"Firestore query error: {e}")
+                response_text = "I am having trouble looking for doctors right now. Please try again later."
+    
+    # Construct and return the Dialogflow-formatted JSON response
+    return jsonify({
+        'fulfillmentResponse': {
+            'messages': [
+                {
+                    'text': {
+                        'text': [response_text]
                     }
-                ]
-            }
+                }
+            ]
         }
-        
-        return jsonify(response)
-
-    except Exception as e:
-        print(f"Error handling webhook request: {e}")
-        return jsonify({
-            "fulfillmentResponse": {
-                "messages": [
-                    {
-                        "text": {
-                            "text": ["An error occurred while processing your request."]
-                        }
-                    }
-                ]
-            }
-        }), 500
+    })
 
 if __name__ == '__main__':
-    # Cloud Run provides the PORT environment variable.
-    port = int(os.environ.get('PORT', 8080))
+    # For local development, use a development server
+    # In production (e.g., Cloud Run), the port is set by the environment
+    port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
