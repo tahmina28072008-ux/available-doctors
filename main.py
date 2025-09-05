@@ -29,14 +29,28 @@ def webhook():
     if tag == 'search_doctors':
         specialty = parameters.get('specialty')
         location = parameters.get('location', {}).get('city')
-        date_str = parameters.get('date')
+        date_param = parameters.get('date') # Get the full date object/string
+
+        # Safely extract the date string from the parameter
+        if isinstance(date_param, str):
+            date_str = date_param
+        elif isinstance(date_param, dict) and 'date_time' in date_param:
+            date_str = date_param['date_time']
+        else:
+            # Handle cases where the date parameter is missing or in an unexpected format
+            response_text = "I couldn't understand the date provided. Please try again."
+            return jsonify({
+                'fulfillmentResponse': {
+                    'messages': [{ 'text': { 'text': [response_text] } }]
+                }
+            })
 
         if not specialty or not location or not date_str:
             response_text = "I'm missing some information. Please provide your preferred specialty, location, and date."
         else:
             try:
                 # Dialogflow sends date as ISO 8601 string (e.g., '2025-09-05T12:00:00Z')
-                # We need to extract the date part and check if it's in the future
+                # We extract the date part and check if it's in the future
                 requested_date = datetime.strptime(date_str.split('T')[0], '%Y-%m-%d').date()
                 today = datetime.now().date()
                 
