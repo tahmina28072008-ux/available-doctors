@@ -66,16 +66,16 @@ def webhook():
             logging.info("Date parameter is a string.")
         elif isinstance(date_param, dict):
             try:
-                year = date_param.get('year')
-                month = date_param.get('month')
-                day = date_param.get('day')
+                year = int(date_param.get('year'))
+                month = int(date_param.get('month'))
+                day = int(date_param.get('day'))
                 # Construct an ISO 8601 formatted date string
                 date_str = datetime(year, month, day).isoformat()
                 logging.info(f"Date parameter is a dict, extracted as {date_str}")
-            except (KeyError, TypeError):
-                # Handle cases where the required keys are missing or invalid
+            except (KeyError, TypeError, ValueError) as e:
+                # Handle cases where the required keys are missing, invalid types, or cannot be converted to int
                 response_text = "I couldn't understand the date provided. Please try again."
-                logging.error("Date parameter dict is missing keys or has invalid types.")
+                logging.error(f"Date parameter dict has an issue: {e}")
                 return jsonify({
                     'fulfillmentResponse': {
                         'messages': [{ 'text': { 'text': [response_text] } }]
