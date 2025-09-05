@@ -147,3 +147,9 @@ def webhook():
             ]
         }
     })
+
+# --- Application Entry Point ---
+if __name__ == '__main__':
+    print("INFO: Starting application locally...")
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
