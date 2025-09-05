@@ -73,7 +73,7 @@ def webhook():
                 'fulfillmentResponse': {
                     'messages': [{ 'text': { 'text': [response_text] } }]
                 }
-            })
+            )
 
         if not specialty or not location or not date_str:
             response_text = "I'm missing some information. Please provide your preferred specialty, location, and date."
@@ -147,7 +147,3 @@ def webhook():
             ]
         }
     })
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
