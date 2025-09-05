@@ -140,7 +140,7 @@ def webhook():
                 
                 if available_doctors:
                     doctor_list_text = " and ".join([f"{doc['name']} has availability at {doc['times']}" for doc in available_doctors])
-                    response_text = f"I found the following doctors: {doctor_list_text}. Please let me know which doctor and time you would like to book."
+                    response_text = f"I found the following doctors: {doctor_list_text}."
                     logging.info(f"Found {len(available_doctors)} available doctor(s).")
                 else:
                     response_text = f"I could not find any {specialty} doctors in {location} available on {requested_date.strftime('%B %d, %Y')}. Would you like to check a different date or location?"
